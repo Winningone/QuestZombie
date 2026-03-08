@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: QuestZombie
+## Notes: Automatically accepts and turns in quests with optional keyboard reward selection
+## Author: <your name>
+## Version: 0.1.0
+## SavedVariables: QuestZombieDB
+
+QuestZombie.lua

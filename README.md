@@ -11,17 +11,6 @@ The addon is designed to reduce repetitive quest interactions while still allowi
 
 QuestZombie is currently in **active development (beta)**.
 
-The intelligent reward system is implemented for the following classes:
-
-* Hunter
-* Rogue
-* Warrior
-* Paladin
-
-Additional classes will be added in future updates.
-
-Because reward scoring logic must account for many gear combinations and special cases, **player testing is important**. Feedback from real gameplay helps refine the selection system.
-
 ---
 
 ## Features
@@ -33,8 +22,21 @@ Because reward scoring logic must account for many gear combinations and special
 * Automatically completes quests
 * Optional escort quest confirmation
 * Works during raid groups if enabled
+* Adds ability to use number keys to select quest rewards with 1 being the upper left reward and progressing left to right then top to bottom.
+* An intelligent reward selection system (In Development)
 
 **Smart Reward Selection**
+
+The intelligent reward system is implemented for the following classes:
+
+* Hunter
+* Rogue
+* Warrior
+* Paladin
+
+Additional classes will be added in future updates.
+
+Because reward scoring logic must account for many gear combinations and special cases, **player testing is important**. Feedback from real gameplay helps refine the selection system.
 
 The addon evaluates quest rewards based on:
 

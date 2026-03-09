@@ -65,6 +65,7 @@ local DisableRewardListener
 local EnableRewardListener
 local EnsureGUI
 local GetRewardScoreBreakdown
+local TestWeaponParser
 
 local GUIFrame = nil
 local GUIRefresh = nil
@@ -291,6 +292,11 @@ SlashCmdList["QUESTZOMBIE"] = function(msg)
         end
         return
     end
+	
+	if cmd == "testparser" then
+        TestWeaponParser()
+        return
+    end
 
     local key = map[cmd]
     if not key then
@@ -503,6 +509,8 @@ local function GetRewardProfile()
         end
     end
 
+    -- Unsupported class/spec while in auto mode:
+    -- fall back to manual reward selection instead of vendor mode.
     return nil
 end
 
@@ -541,9 +549,15 @@ local function GetWeaponInfoFromLink(link)
     local speed, minDamage, maxDamage
 
     for i = 2, itemScanTip:NumLines() do
-        local leftText = _G["QuestZombieItemScanTooltipTextLeft" .. i]
-        if leftText then
-            local text = leftText:GetText()
+        local leftFS = _G["QuestZombieItemScanTooltipTextLeft" .. i]
+        local rightFS = _G["QuestZombieItemScanTooltipTextRight" .. i]
+
+        local leftText = leftFS and leftFS:GetText()
+        local rightText = rightFS and rightFS:GetText()
+
+        local texts = { leftText, rightText }
+
+        for _, text in ipairs(texts) do
             if text and text ~= "" then
                 local lower = string.lower(text)
 
@@ -555,8 +569,8 @@ local function GetWeaponInfoFromLink(link)
                 end
 
                 if not minDamage then
-                    local a, b = string.match(lower, "(%d+)%s*%-%s*(%d+)%s+damage")
-                    if a and b then
+                    local a, b = string.match(lower, "(%d+)%s*%-%s*(%d+)")
+                    if a and b and string.find(lower, "damage") then
                         minDamage = tonumber(a)
                         maxDamage = tonumber(b)
                     end
@@ -567,6 +581,25 @@ local function GetWeaponInfoFromLink(link)
 
     itemScanTip:Hide()
     return speed, minDamage, maxDamage
+end
+
+TestWeaponParser = function()
+    local mh = GetInventoryItemLink("player", 16)
+    local oh = GetInventoryItemLink("player", 17)
+
+    if mh then
+        local speed, minDamage, maxDamage = GetWeaponInfoFromLink(mh)
+        Print("MH parser: speed=" .. tostring(speed) .. ", min=" .. tostring(minDamage) .. ", max=" .. tostring(maxDamage) .. ", link=" .. tostring(mh))
+    else
+        Print("MH parser: no main-hand weapon equipped")
+    end
+
+    if oh then
+        local speed, minDamage, maxDamage = GetWeaponInfoFromLink(oh)
+        Print("OH parser: speed=" .. tostring(speed) .. ", min=" .. tostring(minDamage) .. ", max=" .. tostring(maxDamage) .. ", link=" .. tostring(oh))
+    else
+        Print("OH parser: no off-hand weapon equipped")
+    end
 end
 
 local function IsMainHandSlot(slotID)
@@ -2369,6 +2402,13 @@ GetRewardScoreBreakdown = function(meta, profile, slotID, pairedMeta)
         return result
     end
 
+    -- Hard reject unusable items in all smart profiles.
+    if meta.isUsable == false then
+        result.usable = -1000000
+        result.total = result.usable
+        return result
+    end
+
     if profile == "hunter_leveling" or profile == "hunter_bm" or profile == "hunter_mm" or profile == "hunter_sv" then
         local total = 0
 
@@ -2698,6 +2738,9 @@ local function ChooseSmartReward()
     local bestRawScore = nil
     local foundUncached = false
 
+    local bestVendorIndex = nil
+    local bestVendorScore = nil
+
     for i = 1, math.min(numChoices, 10) do
         local meta = GetRewardMeta(i)
 
@@ -2706,6 +2749,12 @@ local function ChooseSmartReward()
         end
 
         local delta, rewardScore, equippedScore, slotID, rewardBreakdown, equippedBreakdown = GetUpgradeDelta(meta, profile)
+
+        local vendorScore = ScoreVendorReward(meta)
+        if bestVendorScore == nil or vendorScore > bestVendorScore then
+            bestVendorScore = vendorScore
+            bestVendorIndex = i
+        end
 
         if rewardBreakdown then
             DebugPrint(
@@ -2765,38 +2814,15 @@ local function ChooseSmartReward()
         end
     end
 
+    -- If nothing is an upgrade, take the highest vendor value.
+    if bestDelta == nil or bestDelta <= 0 then
+        if bestVendorIndex then
+            DebugPrint("no positive upgrade found; falling back to highest vendor value")
+            return bestVendorIndex, profile, foundUncached
+        end
+    end
+
     return bestIndex, profile, foundUncached
-end
-
-local function HandleRewardKey(key)
-    if not DB.rewardKeys or not IsAutomationAllowed() then
-        return
-    end
-
-    local choice = rewardKeyMap[key]
-    if not choice then
-        return
-    end
-
-    if key:match("^NUMPAD") then
-        -- allowed
-    elseif not key:match("^[0-9]$") then
-        return
-    end
-
-    local numChoices = GetNumQuestChoices()
-    if numChoices < 1 then
-        DisableRewardListener()
-        return
-    end
-
-    if choice > numChoices then
-        Print("No quest reward in slot " .. choice)
-        return
-    end
-
-    GetQuestReward(choice)
-    DisableRewardListener()
 end
 
 local function StartRewardRetry()
@@ -3085,8 +3111,8 @@ end
 
 EnsureGUI()
 
-EnableRewardListener = function(numChoices)
-    if not DB.rewardKeys then
+EnableRewardListener = function(numChoices, forceEnable)
+    if not DB.rewardKeys and not forceEnable then
         return
     end
 
@@ -3174,23 +3200,28 @@ local function HandleQuestComplete()
         return
     end
 
-    local choice, profile, foundUncached = ChooseSmartReward()
+local choice, profile, foundUncached = ChooseSmartReward()
 
-    if choice and choice >= 1 and choice <= numChoices and not foundUncached then
-        DebugPrint("auto reward choice=" .. tostring(choice) .. ", profile=" .. tostring(profile) .. ", comparison=equipped-upgrade-dualslot")
-        GetQuestReward(choice)
-        DisableRewardListener()
-        return
-    end
+if choice and choice >= 1 and choice <= numChoices and not foundUncached then
+    DebugPrint("auto reward choice=" .. tostring(choice) .. ", profile=" .. tostring(profile) .. ", comparison=equipped-upgrade-dualslot")
+    GetQuestReward(choice)
+    DisableRewardListener()
+    return
+end
 
-    if foundUncached and DB.smartRewards and DB.rewardMode ~= "manual" then
-        DebugPrint("uncached reward data detected; waiting for retry")
-        DisableRewardListener()
-        StartRewardRetry()
-        return
-    end
+if foundUncached and DB.smartRewards and DB.rewardMode ~= "manual" then
+    DebugPrint("uncached reward data detected; waiting for retry")
+    DisableRewardListener()
+    StartRewardRetry()
+    return
+end
 
-    EnableRewardListener(numChoices)
+if DB.smartRewards and DB.rewardMode == "auto" and not GetRewardProfile() then
+    Print("No smart reward profile for this class yet. Select your reward manually.")
+end
+
+local forceManualKeys = DB.smartRewards and DB.rewardMode == "auto" and not GetRewardProfile()
+EnableRewardListener(numChoices, forceManualKeys)
 end
 
 local function HandleQuestFinished()
@@ -3250,7 +3281,8 @@ addon:SetScript("OnUpdate", function(_, elapsed)
     if pendingRewardRetryCount >= (DB.rewardRetryMax or 8) then
         DebugPrint("retry exhausted; falling back to manual reward selection")
         StopRewardRetry()
-        EnableRewardListener(numChoices)
+        local forceManualKeys = DB.smartRewards and DB.rewardMode == "auto" and not GetRewardProfile()
+		EnableRewardListener(numChoices, forceManualKeys)
         return
     end
 
